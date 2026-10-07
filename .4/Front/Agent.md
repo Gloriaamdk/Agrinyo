@@ -1,0 +1,1 @@
+Je vais utiliser flutter pour le front end et django pour le backend
