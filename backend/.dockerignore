@@ -1,0 +1,9 @@
+# Aucun fichier d'environnement dans l'image : les secrets arrivent à l'exécution (--env-file).
+.env*
+.venv
+**/__pycache__
+**/*.pyc
+media
+staticfiles
+Dockerfile
+.dockerignore

@@ -1,0 +1,29 @@
+# Production : API Django + site React. Ni base de données (PostgreSQL externe) ni proxy (HTTPS et routage
+# fournis par l'hébergeur ou ton propre proxy). Mode d'emploi complet : DEPLOIEMENT.md.
+#   docker compose build
+#   docker compose run --rm backend python manage.py migrate
+#   docker compose up -d
+
+services:
+  backend:
+    build: ./backend
+    image: agrinyo-backend
+    env_file: backend/.env.production
+    volumes:
+      # Photos envoyées : à sauvegarder avec la base.
+      - agrinyo-media:/app/media
+    ports:
+      # 127.0.0.1 : joignable seulement par le proxy de cette machine. Retirer « 127.0.0.1: » si le proxy est ailleurs.
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    # VITE_API_URL : frontend/.env.production, figée dans le site à la construction.
+    build: ./frontend
+    image: agrinyo-frontend
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+
+volumes:
+  agrinyo-media:
