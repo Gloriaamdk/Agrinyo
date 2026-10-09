@@ -196,7 +196,7 @@ export default function Connexion() {
                     {...saisie('username')}
                   />
                   <Champ
-                    libelle="E-mail (facultatif)"
+                    libelle="E-mail (pour récupérer votre mot de passe)"
                     Icone={IconeEnveloppe}
                     type="email"
                     autoComplete="email"

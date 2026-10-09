@@ -7,6 +7,8 @@ from rest_framework.authtoken.models import Token
 
 from .backends import trouver_utilisateur
 from .codes import MESSAGE_CODE_REFUSE, verifier_code
+from .envoi_code import EMAIL
+from .envoi_code import canal as canal_code
 from .models import CodeChangementTelephone, CodeReinitialisation, Utilisateur
 from .photos import preparer_photo
 from .telephone import normaliser_telephone
@@ -133,7 +135,7 @@ class ConnexionSerializer(serializers.Serializer):
 
 
 class MotDePasseOublieSerializer(serializers.Serializer):
-    # Nom d'utilisateur, e-mail ou numéro : le code part toujours par SMS au numéro du compte.
+    # Nom d'utilisateur, e-mail ou numéro : le code part à l'adresse du compte (e-mail ou SMS, OTP_CANAL).
     identifiant = serializers.CharField()
 
 
@@ -227,6 +229,10 @@ class DemandeChangementTelephoneSerializer(serializers.Serializer):
             raise serializers.ValidationError("C'est déjà le numéro de votre compte.")
         if Utilisateur.objects.exclude(pk=utilisateur.pk).filter(telephone=telephone).exists():
             raise serializers.ValidationError('Ce numéro est déjà utilisé par un autre compte.')
+        if canal_code() == EMAIL and not utilisateur.email:
+            raise serializers.ValidationError(
+                'Ajoutez d’abord une adresse e-mail à votre profil : le code de confirmation y est envoyé.'
+            )
         return telephone
 
 

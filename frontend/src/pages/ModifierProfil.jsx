@@ -166,7 +166,10 @@ function BlocInformations() {
   )
 }
 
-/** Nouveau numéro → code envoyé par SMS à ce numéro → le numéro du compte change une fois le code saisi. */
+/**
+ * Nouveau numéro → code de confirmation (par e-mail à l'adresse du compte, ou par SMS au nouveau numéro selon
+ * le serveur) → le numéro du compte change une fois le code saisi.
+ */
 function BlocTelephone() {
   const { utilisateur, confirmerTelephone } = useSession()
   const envoi = useEnvoi()
@@ -174,6 +177,8 @@ function BlocTelephone() {
   const [numero, setNumero] = useState('')
   const [code, setCode] = useState('')
   const [attente, setAttente] = useState(0)
+  // Réponse du serveur : canal (« email » ou « sms ») et destinataire masqué (k***o@gmail.com).
+  const [envoye, setEnvoye] = useState(null)
 
   useEffect(() => {
     if (attente <= 0) return
@@ -183,7 +188,7 @@ function BlocTelephone() {
 
   const envoyerCode = () =>
     envoi.executer(async () => {
-      await demanderChangementTelephone(`+228${numero}`)
+      setEnvoye(await demanderChangementTelephone(`+228${numero}`))
       setEtape('code')
       setCode('')
       setAttente(DELAI_RENVOI_S)
@@ -236,7 +241,7 @@ function BlocTelephone() {
             {envoi.erreurChamp('telephone') ? (
               <span className="erreur">{envoi.erreurChamp('telephone')}</span>
             ) : (
-              <span className="champ__aide">Un code de vérification sera envoyé par SMS à ce nouveau numéro.</span>
+              <span className="champ__aide">Un code de confirmation vous sera envoyé.</span>
             )}
           </label>
           <Retour envoi={envoi} champs={['telephone']} />
@@ -247,11 +252,12 @@ function BlocTelephone() {
       ) : (
         <form className="formulaire" onSubmit={confirmer} noValidate>
           <p className="authentification__note" role="status">
-            Un code à 6 chiffres vient d’être envoyé par SMS au <strong>+228 {numero.trim()}</strong>. Il est valable
-            10 minutes.
+            Un code à 6 chiffres vient d’être envoyé {envoye?.canal === 'sms' ? 'par SMS au' : 'par e-mail à'}{' '}
+            <strong>{envoye?.destinataire ?? `+228 ${numero.trim()}`}</strong>. Il est valable 10 minutes.
+            {envoye?.canal !== 'sms' && ' Pensez à regarder dans les courriers indésirables.'}
           </p>
           <ChampTexte
-            libelle="Code reçu par SMS"
+            libelle={envoye?.canal === 'sms' ? 'Code reçu par SMS' : 'Code reçu par e-mail'}
             inputMode="numeric"
             autoComplete="one-time-code"
             maxLength={6}

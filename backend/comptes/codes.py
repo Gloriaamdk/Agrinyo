@@ -4,10 +4,10 @@ from datetime import timedelta
 from django.contrib.auth.hashers import check_password, make_password
 from django.db.models import F
 
-# Pas de nouveau SMS avant ce délai : évite les envois en rafale (et la facture qui va avec).
+# Pas de nouveau code avant ce délai : évite les envois en rafale (et la facture SMS qui va avec).
 DELAI_RENVOI = timedelta(seconds=60)
 
-MESSAGE_CODE_REFUSE = 'Code incorrect ou expiré. Vérifiez le SMS ou demandez un nouveau code.'
+MESSAGE_CODE_REFUSE = 'Code incorrect ou expiré. Vérifiez le message reçu ou demandez un nouveau code.'
 
 
 def generer_code():

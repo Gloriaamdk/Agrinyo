@@ -193,7 +193,7 @@ class AuthentificationTests(APITestCase):
         self.assertEqual(codes[-1], 429)
 
 
-@override_settings(SMS_BACKEND='memoire')
+@override_settings(SMS_BACKEND='memoire', OTP_CANAL='sms')
 class MotDePasseOublieTests(APITestCase):
     NOUVEAU = 'nouvelle-recolte-2027'
 
@@ -372,7 +372,7 @@ class ModificationProfilTests(APITestCase):
         self.assertIn('nouveau_mot_de_passe', reponse.data)
 
 
-@override_settings(SMS_BACKEND='memoire')
+@override_settings(SMS_BACKEND='memoire', OTP_CANAL='sms')
 class ChangementTelephoneTests(APITestCase):
     def setUp(self):
         cache.clear()
@@ -479,3 +479,122 @@ class SanteTests(APITestCase):
 
         self.assertEqual(reponse.status_code, 200)
         self.assertEqual(reponse.json(), {'statut': 'ok'})
+
+
+@override_settings(SMS_BACKEND='twilio', TWILIO_ACCOUNT_SID='AC123', TWILIO_AUTH_TOKEN='jeton', TWILIO_FROM='AgriLink')
+class TwilioTests(SimpleTestCase):
+    """Envoi réel simulé : aucun appel ne part vers Twilio."""
+
+    def test_envoi_accepte(self):
+        from unittest import mock
+
+        reponse = mock.MagicMock()
+        reponse.__enter__.return_value = io.BytesIO(b'{"sid": "SM1", "status": "queued"}')
+        with mock.patch('urllib.request.urlopen', return_value=reponse) as appel:
+            sms.envoyer_sms('+22890123456', 'Code : 123456')
+
+        requete = appel.call_args.args[0]
+        self.assertEqual(requete.full_url, 'https://api.twilio.com/2010-04-01/Accounts/AC123/Messages.json')
+        self.assertIn(b'To=%2B22890123456', requete.data)
+        self.assertIn(b'From=AgriLink', requete.data)
+
+    def test_refus_twilio_explique_sans_exposer_le_numero(self):
+        import urllib.error
+        from unittest import mock
+
+        refus = urllib.error.HTTPError(
+            'https://api.twilio.com', 400, 'Bad Request', {},
+            io.BytesIO(b'{"code": 21608, "message": "The number is unverified."}'),
+        )
+        with mock.patch('urllib.request.urlopen', side_effect=refus), self.assertLogs('comptes.sms', 'ERROR') as journal:
+            with self.assertRaisesMessage(sms.ErreurEnvoiSms, 'code Twilio 21608'):
+                sms.envoyer_sms('+22890123456', 'Code : 123456')
+
+        self.assertIn('+22890****56', journal.output[0])
+        self.assertNotIn('90123456', journal.output[0])
+
+    @override_settings(TWILIO_AUTH_TOKEN='')
+    def test_configuration_incomplete(self):
+        from unittest import mock
+
+        with mock.patch('urllib.request.urlopen') as appel, self.assertLogs('comptes.sms', 'ERROR'):
+            with self.assertRaises(sms.ErreurEnvoiSms):
+                sms.envoyer_sms('+22890123456', 'Code : 123456')
+        appel.assert_not_called()
+
+
+@override_settings(OTP_CANAL='email')
+class CodeParEmailTests(APITestCase):
+    """Codes à usage unique envoyés par e-mail (pas de fournisseur SMS)."""
+
+    def setUp(self):
+        from django.core import mail
+
+        self.mail = mail
+        cache.clear()
+        reponse = self.client.post('/api/register/', INSCRIPTION)  # e-mail : mawuli@exemple.tg
+        self.jeton = reponse.data['token']
+
+    def code_recu(self):
+        message = self.mail.outbox[-1]
+        return message, re.search(r'\b(\d{6})\b', message.body).group(1)
+
+    def test_mot_de_passe_oublie_par_email(self):
+        reponse = self.client.post('/api/password/forgot/', {'identifiant': '90 12 34 56'})
+
+        self.assertEqual(reponse.status_code, 200)
+        self.assertEqual(reponse.data['canal'], 'email')
+        message, code = self.code_recu()
+        self.assertEqual(message.to, ['mawuli@exemple.tg'])
+        self.assertIn('Bonjour Mawuli', message.body)
+        reinitialisation = self.client.post(
+            '/api/password/reset/',
+            {'identifiant': 'mawuli.a', 'code': code, 'mot_de_passe': 'nouvelle-recolte-2027'},
+        )
+        self.assertEqual(reinitialisation.status_code, 200, reinitialisation.data)
+        connexion = self.client.post('/api/login/', {'identifiant': 'mawuli.a', 'mot_de_passe': 'nouvelle-recolte-2027'})
+        self.assertEqual(connexion.status_code, 200)
+
+    def test_compte_sans_email_meme_reponse_et_aucun_envoi(self):
+        Utilisateur.objects.filter(username='mawuli.a').update(email=None)
+
+        avec_compte = self.client.post('/api/password/forgot/', {'identifiant': 'mawuli.a'})
+        sans_compte = self.client.post('/api/password/forgot/', {'identifiant': 'personne'})
+
+        self.assertEqual(avec_compte.data, sans_compte.data)
+        self.assertEqual(self.mail.outbox, [])
+
+    def test_changement_de_numero_confirme_par_email(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.jeton}')
+
+        demande = self.client.post('/api/profile/phone/', {'telephone': '93 00 00 00'})
+
+        self.assertEqual(demande.status_code, 200, demande.data)
+        self.assertEqual(demande.data['destinataire'], 'm***i@exemple.tg')
+        message, code = self.code_recu()
+        self.assertIn('+22893000000', message.body)
+        confirmation = self.client.post('/api/profile/phone/confirm/', {'code': code})
+        self.assertEqual(confirmation.data['telephone'], '+22893000000')
+
+    def test_changement_de_numero_sans_email(self):
+        Utilisateur.objects.filter(username='mawuli.a').update(email=None)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.jeton}')
+
+        reponse = self.client.post('/api/profile/phone/', {'telephone': '93 00 00 00'})
+
+        self.assertEqual(reponse.status_code, 400)
+        self.assertIn('adresse e-mail', reponse.data['telephone'][0])
+        self.assertEqual(self.mail.outbox, [])
+
+    def test_serveur_smtp_en_panne(self):
+        import smtplib
+        from unittest import mock
+
+        with mock.patch('comptes.envoi_code.send_mail', side_effect=smtplib.SMTPException('refus')), \
+                self.assertLogs('comptes.envoi_code', 'ERROR') as journal:
+            reponse = self.client.post('/api/password/forgot/', {'identifiant': 'mawuli.a'})
+
+        self.assertEqual(reponse.status_code, 503)
+        self.assertNotIn('mawuli@exemple.tg', journal.output[0])
+        # Code jamais reçu : on peut redemander tout de suite.
+        self.assertFalse(CodeReinitialisation.objects.exists())

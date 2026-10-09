@@ -10,7 +10,7 @@ const DELAI_RENVOI_S = 60
 
 /**
  * « Mot de passe oublié » en deux étapes :
- * 1. l'identifiant → un code part par SMS au numéro du compte ;
+ * 1. l'identifiant → un code part à l'adresse e-mail du compte (ou par SMS, selon le serveur) ;
  * 2. le code + le nouveau mot de passe → la personne est connectée.
  */
 export default function MotDePasseOublie({ identifiantInitial, onRetour, onConnecte }) {
@@ -22,6 +22,8 @@ export default function MotDePasseOublie({ identifiantInitial, onRetour, onConne
   const [attente, setAttente] = useState(0)
   const [erreur, setErreur] = useState(null)
   const [envoi, setEnvoi] = useState(false)
+  // « email » ou « sms » : canal choisi par le serveur (réponse de /api/password/forgot/).
+  const [canal, setCanal] = useState(null)
 
   useEffect(() => {
     if (attente <= 0) return
@@ -43,7 +45,8 @@ export default function MotDePasseOublie({ identifiantInitial, onRetour, onConne
 
   const envoyerCode = () =>
     executer(async () => {
-      await api.demanderCode(identifiant)
+      const reponse = await api.demanderCode(identifiant)
+      setCanal(reponse?.canal ?? null)
       setEtape('code')
       setCode('')
       setAttente(DELAI_RENVOI_S)
@@ -71,7 +74,11 @@ export default function MotDePasseOublie({ identifiantInitial, onRetour, onConne
     <>
       <div className="authentification__titres">
         <h1>Mot de passe oublié</h1>
-        <p>{etape === 'demande' ? 'Recevez un code par SMS' : 'Saisissez le code reçu par SMS'}</p>
+        <p>
+          {etape === 'demande'
+            ? 'Recevez un code de vérification'
+            : `Saisissez le code reçu par ${canal === 'sms' ? 'SMS' : 'e-mail'}`}
+        </p>
       </div>
 
       {etape === 'demande' ? (
@@ -82,7 +89,7 @@ export default function MotDePasseOublie({ identifiantInitial, onRetour, onConne
             autoComplete="username"
             autoCapitalize="none"
             spellCheck={false}
-            aide="Le code sera envoyé au numéro de téléphone de votre compte."
+            aide="Le code sera envoyé à l’adresse e-mail de votre compte."
             erreur={erreurChamp('identifiant')}
             value={identifiant}
             onChange={(e) => setIdentifiant(e.target.value)}
@@ -94,8 +101,18 @@ export default function MotDePasseOublie({ identifiantInitial, onRetour, onConne
       ) : (
         <form className="formulaire" onSubmit={reinitialiser} noValidate>
           <p className="authentification__note" role="status">
-            Si un compte correspond à « {identifiant.trim()} », un code à 6 chiffres vient d’être envoyé par SMS
-            au numéro du compte. Il est valable 10 minutes.
+            {canal === 'sms' ? (
+              <>
+                Si un compte correspond à « {identifiant.trim()} », un code à 6 chiffres vient d’être envoyé par SMS
+                au numéro du compte. Il est valable 10 minutes.
+              </>
+            ) : (
+              <>
+                Si un compte avec une adresse e-mail correspond à « {identifiant.trim()} », un code à 6 chiffres vient
+                d’être envoyé à cette adresse. Il est valable 10 minutes. Pensez à regarder dans les courriers
+                indésirables. Compte sans adresse e-mail : contactez l’équipe AgriLink.
+              </>
+            )}
           </p>
           <Champ
             libelle="Code à 6 chiffres"

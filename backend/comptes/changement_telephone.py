@@ -3,16 +3,17 @@ from django.utils import timezone
 from rest_framework.exceptions import Throttled
 
 from .codes import DELAI_RENVOI, generer_code
+from .envoi_code import envoyer_code, texte_email
 from .models import CodeChangementTelephone
-from .sms import envoyer_sms
 
 
 def demander_changement(utilisateur, nouveau_telephone):
     """
-    Envoie un code au nouveau numéro (déjà normalisé et vérifié libre).
-    Un seul SMS par minute et par compte, quel que soit le numéro demandé : on ne peut pas
-    se servir de ce formulaire pour envoyer des SMS à la chaîne.
-    Lève ErreurEnvoiSms si le fournisseur refuse l'envoi.
+    Envoie un code de confirmation (numéro déjà normalisé et vérifié libre) : par SMS au nouveau numéro,
+    ou par e-mail à l'adresse du compte (OTP_CANAL).
+    Un seul envoi par minute et par compte, quel que soit le numéro demandé : on ne peut pas
+    se servir de ce formulaire pour envoyer des messages à la chaîne.
+    Lève ErreurEnvoiCode si l'envoi échoue.
     """
     with transaction.atomic():
         precedent = CodeChangementTelephone.objects.select_for_update().filter(utilisateur=utilisateur).first()
@@ -27,9 +28,16 @@ def demander_changement(utilisateur, nouveau_telephone):
         )
     minutes = int(CodeChangementTelephone.DUREE_VALIDITE.total_seconds() // 60)
     try:
-        envoyer_sms(
-            nouveau_telephone,
-            f'AgriLink : code {code} pour utiliser ce numéro sur votre compte. Il expire dans {minutes} minutes.',
+        envoyer_code(
+            utilisateur,
+            telephone=nouveau_telephone,
+            sujet=f'AgriLink : votre code {code}',
+            texte_email=texte_email(utilisateur, (
+                f'Votre code pour utiliser le numéro {nouveau_telephone} sur votre compte : {code}\n'
+                f'Il expire dans {minutes} minutes.\n\n'
+                "Si vous n'avez rien demandé, ignorez ce message : votre numéro ne change pas."
+            )),
+            texte_sms=f'AgriLink : code {code} pour utiliser ce numéro sur votre compte. Il expire dans {minutes} minutes.',
         )
     except Exception:
         nouveau.delete()

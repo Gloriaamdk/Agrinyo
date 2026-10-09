@@ -15,7 +15,7 @@ from .serializers import (
     DemandeChangementTelephoneSerializer, InscriptionSerializer, ModificationProfilSerializer,
     MotDePasseOublieSerializer, ReinitialisationSerializer, UtilisateurSerializer,
 )
-from .sms import ErreurEnvoiSms
+from .envoi_code import EMAIL, ErreurEnvoiCode, canal, destinataire_masque
 
 
 def _client_web(request):
@@ -115,7 +115,7 @@ class ChangementMotDePasseView(APIView):
 
 
 class MotDePasseOublieView(APIView):
-    """Étape 1 : envoie un code par SMS. Même réponse que le compte existe ou non."""
+    """Étape 1 : envoie un code (e-mail ou SMS). Même réponse que le compte existe ou non."""
 
     permission_classes = [permissions.AllowAny]
     throttle_classes = [ScopedRateThrottle]
@@ -126,12 +126,16 @@ class MotDePasseOublieView(APIView):
         serializer.is_valid(raise_exception=True)
         try:
             demander_code(serializer.validated_data['identifiant'])
-        except ErreurEnvoiSms:
+        except ErreurEnvoiCode:
             return Response(
-                {'detail': "Le SMS n'a pas pu être envoyé. Réessayez dans un instant."},
+                {'detail': "Le code n'a pas pu être envoyé. Réessayez dans un instant."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        return Response({'detail': 'Si un compte correspond, un code vient de partir par SMS.'})
+        if canal() == EMAIL:
+            detail = 'Si un compte avec une adresse e-mail correspond, un code vient de partir par e-mail.'
+        else:
+            detail = 'Si un compte correspond, un code vient de partir par SMS.'
+        return Response({'detail': detail, 'canal': canal()})
 
 
 class ReinitialisationView(APIView):
@@ -161,12 +165,19 @@ class ChangementTelephoneView(APIView):
         telephone = serializer.validated_data['telephone']
         try:
             demander_changement(request.user, telephone)
-        except ErreurEnvoiSms:
+        except ErreurEnvoiCode:
             return Response(
-                {'detail': "Le SMS n'a pas pu être envoyé. Réessayez dans un instant."},
+                {'detail': "Le code n'a pas pu être envoyé. Réessayez dans un instant."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        return Response({'detail': f'Un code vient de partir par SMS au {telephone}.', 'telephone': telephone})
+        envoye_a = destinataire_masque(request.user, telephone)
+        moyen = 'par e-mail à' if canal() == EMAIL else 'par SMS au'
+        return Response({
+            'detail': f'Un code vient de partir {moyen} {envoye_a}.',
+            'telephone': telephone,
+            'canal': canal(),
+            'destinataire': envoye_a,
+        })
 
 
 class ConfirmationTelephoneView(APIView):

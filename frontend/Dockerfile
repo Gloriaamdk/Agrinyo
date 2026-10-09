@@ -12,7 +12,12 @@ RUN npm ci
 COPY . .
 ARG VITE_API_URL=
 # Argument vide : on le retire pour que Vite lise .env.production au lieu d'une valeur vide.
-RUN if [ -z "$VITE_API_URL" ]; then unset VITE_API_URL; fi && npm run build
+# Adresse d'exemple : construction refusée, sinon le site part en ligne sans pouvoir joindre l'API.
+RUN if [ -z "$VITE_API_URL" ]; then unset VITE_API_URL; fi \
+    && npm run build \
+    && if grep -rqE 'exemple\.tg|A_REMPLIR' dist/assets; then \
+         echo "VITE_API_URL vaut encore l'adresse d'exemple : la définir (Coolify : variable de construction)." >&2; exit 1; \
+       fi
 
 # --- Service ---
 FROM node:24-alpine

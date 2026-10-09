@@ -21,7 +21,8 @@ from dotenv import load_dotenv
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-load_dotenv(BASE_DIR / '.env')
+# DJANGO_ENV_FILE=.env.production : utiliser un autre fichier, ex. pour tester_email avec la config de production.
+load_dotenv(BASE_DIR / os.environ.get('DJANGO_ENV_FILE', '.env'))
 
 
 def _env(nom, defaut=''):
@@ -193,6 +194,16 @@ SERVIR_MEDIA = DEBUG or _env('DJANGO_SERVIR_MEDIA') == 'True'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# Cache partagé par tous les processus gunicorn (et conservé aux redémarrages) : les limites anti-abus
+# (connexions, SMS) valent pour l'ensemble du serveur, pas une fois par processus.
+# Table créée par « python manage.py createcachetable » (fait par deploiement/deployer.sh).
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+        'LOCATION': 'cache_agrilink',
+    }
+}
+
 # Cookie de session du site : invisible pour le JavaScript, HTTPS obligatoire hors développement.
 SESSION_COOKIE_HTTPONLY = True
 # Lax : site et API sur le même domaine ou des sous-domaines (app.agrilink.tg / api.agrilink.tg).
@@ -280,10 +291,31 @@ LOGGING = {
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
 
-# Aucun e-mail envoyé par l'application pour l'instant (les codes partent par SMS).
+# Codes à usage unique (mot de passe oublié, changement de numéro) : « email » ou « sms ».
+OTP_CANAL = _env('OTP_CANAL', 'email')
+if OTP_CANAL not in ('email', 'sms'):
+    raise ImproperlyConfigured('OTP_CANAL doit valoir « email » ou « sms ».')
+
+# E-mails : « console » (écrits dans le terminal, développement) ou « smtp » (envoi réel).
+_EMAIL_BACKEND = _env('EMAIL_BACKEND', 'console' if DEBUG else 'smtp')
+if _EMAIL_BACKEND not in ('console', 'smtp'):
+    raise ImproperlyConfigured('EMAIL_BACKEND doit valoir « console » ou « smtp ».')
 MAILERS = {
     'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend' if DEBUG
-        else 'django.core.mail.backends.smtp.EmailBackend',
+        'BACKEND': f'django.core.mail.backends.{_EMAIL_BACKEND}.EmailBackend',
+        **({'OPTIONS': {
+            'host': _env('EMAIL_HOST', 'localhost'),
+            'port': int(_env('EMAIL_PORT', '587')),
+            'username': _env('EMAIL_HOST_USER'),
+            # Mot de passe d'application Google : affiché « abcd efgh ijkl mnop », collé souvent avec les espaces.
+            'password': _env('EMAIL_HOST_PASSWORD').replace(' ', '') if 'gmail.com' in _env('EMAIL_HOST')
+            else _env('EMAIL_HOST_PASSWORD'),
+            # 587 : STARTTLS (EMAIL_USE_TLS=True) ; 465 : SSL direct (EMAIL_USE_SSL=True).
+            'use_tls': _env('EMAIL_USE_TLS', 'True') == 'True',
+            'use_ssl': _env('EMAIL_USE_SSL', 'False') == 'True',
+            'timeout': 10,
+        }} if _EMAIL_BACKEND == 'smtp' else {}),
     },
 }
+# Expéditeur, ex. AgriLink <no-reply@agrilink.tg> (adresse autorisée par le serveur SMTP).
+DEFAULT_FROM_EMAIL = _env('DEFAULT_FROM_EMAIL', 'AgriLink <no-reply@localhost>')

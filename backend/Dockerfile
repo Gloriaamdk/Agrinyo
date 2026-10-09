@@ -1,7 +1,6 @@
-# API Django (gunicorn). PostgreSQL est externe : l'image ne crée pas de base et ne lance pas les migrations.
+# API Django (gunicorn). PostgreSQL est externe : l'image ne crée pas de base, elle applique les migrations au démarrage.
 # Mise en production : voir DEPLOIEMENT.md à la racine du projet.
 #   docker build -t agrinyo-backend backend
-#   docker run --rm --env-file backend/.env.production agrinyo-backend python manage.py migrate
 #   docker run -d -p 8000:8000 --env-file backend/.env.production -v agrinyo-media:/app/media agrinyo-backend
 FROM python:3.12-slim
 
@@ -30,5 +29,7 @@ RUN DJANGO_DEBUG=False DJANGO_SECRET_KEY=construction-seulement python manage.py
 USER agrinyo
 EXPOSE 8000
 # Santé : l'API répond et joint PostgreSQL (docker ps affiche healthy / unhealthy).
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD ["python", "docker-healthcheck.py"]
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--access-logfile", "-", "--error-logfile", "-"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 CMD ["python", "docker-healthcheck.py"]
+# Migrations appliquées au démarrage, avant de servir (Coolify : rien à lancer à la main).
+# DJANGO_MIGRER_AU_DEMARRAGE=False pour les lancer soi-même.
+CMD ["sh", "-c", "if [ \"${DJANGO_MIGRER_AU_DEMARRAGE:-True}\" = True ]; then python manage.py migrate --noinput && python manage.py createcachetable; fi && exec gunicorn config.wsgi:application --bind 0.0.0.0:8000 --access-logfile - --error-logfile -"]

@@ -44,18 +44,35 @@ def _afficher_console(ligne):
     print(ligne.encode(encodage, errors='replace').decode(encodage), flush=True)
 
 
+def masquer(numero):
+    """+22890****56 : assez pour reconnaître un numéro dans les journaux, sans l'exposer."""
+    return f'{numero[:6]}****{numero[-2:]}' if len(numero) > 8 else '****'
+
+
 def _envoyer_twilio(numero, texte):
-    sid = settings.TWILIO_ACCOUNT_SID
-    identifiants = base64.b64encode(f'{sid}:{settings.TWILIO_AUTH_TOKEN}'.encode()).decode()
+    sid, jeton, expediteur = settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN, settings.TWILIO_FROM
+    if not (sid and jeton and expediteur):
+        journal.error('SMS_BACKEND=twilio mais TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN ou TWILIO_FROM est vide.')
+        raise ErreurEnvoiSms('Configuration Twilio incomplète.')
+    identifiants = base64.b64encode(f'{sid}:{jeton}'.encode()).decode()
     requete = urllib.request.Request(
         f'https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json',
-        data=urllib.parse.urlencode({'To': numero, 'From': settings.TWILIO_FROM, 'Body': texte}).encode(),
+        data=urllib.parse.urlencode({'To': numero, 'From': expediteur, 'Body': texte}).encode(),
         headers={'Authorization': f'Basic {identifiants}'},
         method='POST',
     )
     try:
         with urllib.request.urlopen(requete, timeout=10) as reponse:
             json.load(reponse)
+    except urllib.error.HTTPError as erreur:
+        # Twilio explique le refus : numéro non vérifié (compte d'essai), expéditeur refusé, crédit épuisé…
+        try:
+            details = json.load(erreur)
+            raison = f"code Twilio {details.get('code')} : {details.get('message')}"
+        except ValueError:
+            raison = f'HTTP {erreur.code}'
+        journal.error('SMS refusé par Twilio pour %s (%s)', masquer(numero), raison)
+        raise ErreurEnvoiSms(raison) from erreur
     except (urllib.error.URLError, TimeoutError, ValueError) as erreur:
-        journal.exception('Échec de l’envoi du SMS à %s', numero)
+        journal.error('Twilio injoignable pour %s : %s', masquer(numero), erreur)
         raise ErreurEnvoiSms(str(erreur)) from erreur
